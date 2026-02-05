@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Extension Diagnostics</title>
+  <style>
+    body { font-family: Arial; margin: 20px; background: #f5f5f5; }
+    .section { background: white; padding: 15px; margin: 10px 0; border-radius: 5px; }
+    h2 { color: #333; border-bottom: 2px solid #2196F3; padding-bottom: 10px; }
+    .status { padding: 10px; margin: 5px 0; border-radius: 3px; }
+    .ok { background: #c8e6c9; color: #2e7d32; }
+    .error { background: #ffcdd2; color: #c62828; }
+    .warning { background: #fff9c4; color: #f57f17; }
+    code { background: #eee; padding: 2px 5px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>🔧 Extension Diagnostics</h1>
+  
+  <div class="section">
+    <h2>Current Tab Info</h2>
+    <div id="tab-info"></div>
+  </div>
+
+  <div class="section">
+    <h2>Content Script Status</h2>
+    <div id="script-status"></div>
+  </div>
+
+  <div class="section">
+    <h2>Instructions</h2>
+    <ol>
+      <li>Open your Looker Studio report in a new tab</li>
+      <li>Go to that tab's console (F12)</li>
+      <li>Look for a message that says: <code>✅ Content Script Loaded</code></li>
+      <li>If you don't see it, the extension isn't injecting properly</li>
+      <li>Screenshot the console and share with the developer</li>
+    </ol>
+  </div>
+
+  <script>
+    async function checkStatus() {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      
+      const tabInfo = document.getElementById('tab-info');
+      const scriptStatus = document.getElementById('script-status');
+      
+      if (tab) {
+        tabInfo.innerHTML = `
+          <div class="status ok">
+            <strong>URL:</strong> <code>${tab.url}</code><br/>
+            <strong>Title:</strong> ${tab.title}
+          </div>
+        `;
+      }
+      
+      // Try to send a test message
+      chrome.tabs.sendMessage(tab.id, { type: 'PING' }, (response) => {
+        if (chrome.runtime.lastError) {
+          scriptStatus.innerHTML = `
+            <div class="status error">
+              <strong>Content Script Status:</strong> NOT INJECTED<br/>
+              <strong>Error:</strong> ${chrome.runtime.lastError.message}<br/>
+              <br/>
+              This means the extension scripts are not running on this page.
+              Check that the URL matches the manifest patterns.
+            </div>
+          `;
+        } else {
+          scriptStatus.innerHTML = `
+            <div class="status ok">
+              <strong>Content Script Status:</strong> ACTIVE ✅<br/>
+              The extension is properly injected!
+            </div>
+          `;
+        }
+      });
+    }
+    
+    checkStatus();
+  </script>
+</body>
+</html>

@@ -3,7 +3,11 @@
  * Orchestrates the funnel deviation pre-scan
  */
 
-console.log('✅ Content Script Loaded - Looker Studio Extension Active');
+// IMMEDIATE LOG - happens before anything else
+window.__lookerExtensionLoaded = true;
+console.log('✅ CONTENT SCRIPT LOADED - Extension is active on this page');
+console.log('📍 URL:', window.location.href);
+console.log('🔧 Ready to scan for deviations');
 
 // Global state
 const ExtensionState = {
@@ -207,6 +211,12 @@ function clearAllHighlights() {
  * Listens for messages from popup
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Ping for diagnostics
+  if (request.type === 'PING') {
+    sendResponse({ status: 'pong', contentScriptActive: true });
+    return true;
+  }
+
   if (request.type === 'START_SCAN') {
     performDeviationScan().then(() => {
       sendResponse({ status: 'scanning' });

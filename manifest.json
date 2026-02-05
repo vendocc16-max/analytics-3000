@@ -11,7 +11,8 @@
   "host_permissions": [
     "https://looker.google.com/*",
     "https://datastudio.google.com/*",
-    "https://looker.studio.google.com/*"
+    "https://looker.studio.google.com/*",
+    "https://*.google.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -22,7 +23,7 @@
         "https://looker.google.com/*",
         "https://datastudio.google.com/*",
         "https://looker.studio.google.com/*",
-        "https://*.studio.google.com/*"
+        "https://*.google.com/*"
       ],
       "js": [
         "svgParser.js",
