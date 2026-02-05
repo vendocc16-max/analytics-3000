@@ -163,6 +163,9 @@ async function performDeviationScan() {
 
     console.log(`✅ Scan complete. Found ${ExtensionState.deviationResults.length} deviations in ${charts.length} charts`);
 
+    // Store results in local storage for popup to read
+    storeResultsInStorage();
+
   } catch (error) {
     console.error('Error during deviation scan:', error);
   } finally {
@@ -241,6 +244,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
   }
 });
+
+// Store results in local storage whenever they update
+function storeResultsInStorage() {
+  chrome.storage.local.set({
+    deviationResults: ExtensionState.deviationResults,
+    lastScanTime: new Date().toISOString()
+  });
+}
 
 // Auto-scan on page load - automatically detect deviations
 function autoScanIfChartsFound() {

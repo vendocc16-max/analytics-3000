@@ -61,33 +61,6 @@ function displayResults(results, totalCharts) {
 }
 
 /**
- * Sends a message with retry logic
- */
-async function sendMessageWithRetry(tabId, message, maxRetries = 3) {
-  return new Promise((resolve, reject) => {
-    let attempts = 0;
-    
-    function attempt() {
-      attempts++;
-      chrome.tabs.sendMessage(tabId, message, (response) => {
-        if (chrome.runtime.lastError) {
-          if (attempts < maxRetries) {
-            console.log(`Retry ${attempts}/${maxRetries}...`);
-            setTimeout(attempt, 500);
-          } else {
-            reject(new Error(chrome.runtime.lastError.message));
-          }
-        } else {
-          resolve(response);
-        }
-      });
-    }
-    
-    attempt();
-  });
-}
-
-/**
  * Starts the deviation scan
  */
 async function startScan() {
@@ -103,28 +76,14 @@ async function startScan() {
       throw new Error('No active tab found');
     }
 
-    // Try to send start scan message with retry
-    try {
-      await sendMessageWithRetry(tab.id, { type: 'START_SCAN' });
-    } catch (e) {
-      console.warn('Start scan message failed, continuing anyway...');
-    }
+    // Try to send message to content script, but don't fail if it doesn't work
+    chrome.tabs.sendMessage(tab.id, { type: 'START_SCAN' }, (response) => {
+      // Ignore errors - we'll check local storage instead
+    });
 
-    // Wait for results
-    setTimeout(async () => {
-      try {
-        const response = await sendMessageWithRetry(tab.id, { type: 'GET_ANALYSIS' });
-        if (response && response.results) {
-          displayResults(response.results, response.results.length);
-          UI.statusBadge.textContent = `Complete`;
-          UI.statusBadge.className = 'status-badge';
-        }
-      } catch (e) {
-        console.error('Analysis error:', e.message);
-        UI.statusBadge.textContent = 'Error: Extension not active on this page';
-        UI.statusBadge.className = 'status-badge error';
-      }
-      UI.scanBtn.disabled = false;
+    // Wait a moment for scan to complete, then check local storage
+    setTimeout(() => {
+      checkLocalStorage();
     }, 3000);
 
   } catch (error) {
@@ -136,6 +95,28 @@ async function startScan() {
 }
 
 /**
+ * Check local storage for results (content script stores them there)
+ */
+function checkLocalStorage() {
+  chrome.storage.local.get('deviationResults', (data) => {
+    if (data.deviationResults && data.deviationResults.length > 0) {
+      displayResults(data.deviationResults, data.deviationResults.length);
+      UI.statusBadge.textContent = `${data.deviationResults.length} deviations found`;
+      UI.statusBadge.className = data.deviationResults.length > 0 ? 'status-badge error' : 'status-badge';
+    } else {
+      UI.resultsContainer.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">📋</div>
+          <div>No results yet. Make sure you're on a Looker Studio page.</div>
+        </div>
+      `;
+      UI.statusBadge.textContent = 'No results';
+    }
+    UI.scanBtn.disabled = false;
+  });
+}
+
+/**
  * Clears highlights and results
  */
 async function clearResults() {
@@ -143,10 +124,11 @@ async function clearResults() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
     chrome.tabs.sendMessage(tab.id, { type: 'CLEAR_HIGHLIGHTS' }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error('Clear error:', chrome.runtime.lastError);
-        return;
-      }
+      // Ignore errors
+    });
+
+    // Clear storage
+    chrome.storage.local.remove('deviationResults', () => {
       UI.resultsContainer.innerHTML = `
         <div class="empty-state">
           <div class="empty-state-icon">📋</div>
@@ -180,8 +162,8 @@ if (UI.scanBtn) UI.scanBtn.addEventListener('click', startScan);
 if (UI.clearBtn) UI.clearBtn.addEventListener('click', clearResults);
 
 // Load last scan results on popup open
-chrome.storage.local.get('lastScanResults', (data) => {
-  if (data.lastScanResults && data.lastScanResults.results && data.lastScanResults.results.length > 0) {
-    displayResults(data.lastScanResults.results, data.lastScanResults.totalCharts);
+chrome.storage.local.get('deviationResults', (data) => {
+  if (data.deviationResults && data.deviationResults.length > 0) {
+    displayResults(data.deviationResults, data.deviationResults.length);
   }
 });
