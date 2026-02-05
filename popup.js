@@ -76,9 +76,12 @@ async function startScan() {
       throw new Error('No active tab found');
     }
 
-    // Try to send message to content script, but don't fail if it doesn't work
+    // Try to send message to content script, but suppress errors
     chrome.tabs.sendMessage(tab.id, { type: 'START_SCAN' }, (response) => {
-      // Ignore errors - we'll check local storage instead
+      // Suppress chrome.runtime.lastError
+      if (chrome.runtime.lastError) {
+        console.debug('Content script not responding (expected if not a Looker page)');
+      }
     });
 
     // Wait a moment for scan to complete, then check local storage
