@@ -10,7 +10,8 @@
   ],
   "host_permissions": [
     "https://looker.google.com/*",
-    "https://datastudio.google.com/*"
+    "https://datastudio.google.com/*",
+    "https://looker.studio.google.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -19,7 +20,8 @@
     {
       "matches": [
         "https://looker.google.com/reporting/*",
-        "https://datastudio.google.com/reporting/*"
+        "https://datastudio.google.com/reporting/*",
+        "https://looker.studio.google.com/*"
       ],
       "js": [
         "svgParser.js",
