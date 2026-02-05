@@ -9,10 +9,7 @@
     "activeTab"
   ],
   "host_permissions": [
-    "https://looker.google.com/*",
-    "https://datastudio.google.com/*",
-    "https://looker.studio.google.com/*",
-    "https://*.google.com/*"
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -20,10 +17,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://looker.google.com/*",
-        "https://datastudio.google.com/*",
-        "https://looker.studio.google.com/*",
-        "https://*.google.com/*"
+        "https://*/*"
       ],
       "js": [
         "svgParser.js",
@@ -31,8 +25,7 @@
         "chartInteraction.js",
         "content.js"
       ],
-      "run_at": "document_start",
-      "all_frames": false
+      "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
@@ -44,10 +37,7 @@
         "content.js"
       ],
       "matches": [
-        "https://looker.google.com/*",
-        "https://datastudio.google.com/*",
-        "https://looker.studio.google.com/*",
-        "https://*.studio.google.com/*"
+        "https://*/*"
       ]
     }
   ],

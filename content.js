@@ -3,11 +3,16 @@
  * Orchestrates the funnel deviation pre-scan
  */
 
-// IMMEDIATE LOG - happens before anything else
-window.__lookerExtensionLoaded = true;
-console.log('✅ CONTENT SCRIPT LOADED - Extension is active on this page');
-console.log('📍 URL:', window.location.href);
-console.log('🔧 Ready to scan for deviations');
+// FIRST LOG - absolutely at the top
+window.__ext_loaded = true;
+console.log('%c✅ EXTENSION INJECTED', 'background: green; color: white; font-size: 14px; padding: 5px;');
+console.log('Page URL:', window.location.href);
+console.log('Looker Extension is ACTIVE and ready');
+
+// Small delay to ensure logging
+setTimeout(() => {
+  console.log('Extension initialization complete');
+}, 100);
 
 // Global state
 const ExtensionState = {
