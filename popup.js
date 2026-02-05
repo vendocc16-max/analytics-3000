@@ -74,12 +74,22 @@ async function startScan() {
 
     // Send message to content script
     chrome.tabs.sendMessage(tab.id, { type: 'START_SCAN' }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('Send message error:', chrome.runtime.lastError);
+        return;
+      }
       // Response handler for initial ack
     });
 
     // Wait for results
     setTimeout(() => {
       chrome.tabs.sendMessage(tab.id, { type: 'GET_ANALYSIS' }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error('Get analysis error:', chrome.runtime.lastError);
+          UI.statusBadge.textContent = 'Error: Not a Looker Studio page';
+          UI.scanBtn.disabled = false;
+          return;
+        }
         if (response && response.results) {
           displayResults(response.results, response.results.length);
           UI.statusBadge.textContent = `Complete`;
@@ -105,6 +115,10 @@ async function clearResults() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
     chrome.tabs.sendMessage(tab.id, { type: 'CLEAR_HIGHLIGHTS' }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('Clear error:', chrome.runtime.lastError);
+        return;
+      }
       UI.resultsContainer.innerHTML = `
         <div class="empty-state">
           <div class="empty-state-icon">📋</div>
@@ -134,12 +148,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 // Event listeners
-UI.scanBtn.addEventListener('click', startScan);
-UI.clearBtn.addEventListener('click', clearResults);
+if (UI.scanBtn) UI.scanBtn.addEventListener('click', startScan);
+if (UI.clearBtn) UI.clearBtn.addEventListener('click', clearResults);
 
 // Load last scan results on popup open
 chrome.storage.local.get('lastScanResults', (data) => {
-  if (data.lastScanResults && data.lastScanResults.results.length > 0) {
+  if (data.lastScanResults && data.lastScanResults.results && data.lastScanResults.results.length > 0) {
     displayResults(data.lastScanResults.results, data.lastScanResults.totalCharts);
   }
 });
