@@ -15,9 +15,10 @@ chrome.runtime.onInstalled.addListener((details) => {
 // Listen for tab updates
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // Optionally auto-scan when a Looker Studio report loads
-  if (changeInfo.status === 'complete' && 
-      (tab.url.includes('looker.google.com') || tab.url.includes('datastudio.google.com'))) {
-    // Could trigger auto-scan here if desired
+  if (changeInfo.status === 'complete' && tab.url) {
+    if (tab.url.includes('looker.google.com') || tab.url.includes('datastudio.google.com')) {
+      // Could trigger auto-scan here if desired
+    }
   }
 });
 
