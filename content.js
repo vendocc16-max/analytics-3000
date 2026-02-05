@@ -93,7 +93,7 @@ async function analyzeChart(chartContainer) {
 }
 
 /**
- * Performs the complete funnel deviation pre-scan
+ * Performs the complete funnel deviation pre-scan with automatic drill-down
  */
 async function performDeviationScan() {
   if (ExtensionState.isScanning) return;
@@ -106,17 +106,36 @@ async function performDeviationScan() {
     // Find all charts on the page
     const charts = ChartInteraction.findAllCharts();
     
+    console.log(`🔍 Extension scan initiated. Searching for charts...`);
+    
     if (charts.length === 0) {
-      console.log('No charts found on this page');
+      console.warn('⚠️ No charts found on this page');
       ExtensionState.isScanning = false;
       return;
     }
 
-    console.log(`Found ${charts.length} charts. Starting analysis...`);
+    console.log(`✓ Found ${charts.length} charts. Starting deviation analysis...`);
 
     // Analyze each chart
     for (const chart of charts) {
-      await analyzeChart(chart);
+      const result = await analyzeChart(chart);
+      
+      // If deviation found, automatically drill down
+      if (result && result.hasDeviation) {
+        console.log(`📊 Deviation detected in: ${result.chartTitle}. Executing drill-down...`);
+        try {
+          // Click the chart to select it
+          chart.click();
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          // Perform the drill-down automation
+          await automateMetricAndDrillDown(chart, 'CVR', 'Week');
+          console.log(`✓ Drill-down complete for: ${result.chartTitle}`);
+        } catch (drillError) {
+          console.log(`ℹ️ Drill-down not available for this chart (manual interaction may be needed)`);
+        }
+      }
+      
       // Small delay between charts to prevent UI blocking
       await new Promise(resolve => setTimeout(resolve, 500));
     }
@@ -128,10 +147,10 @@ async function performDeviationScan() {
       totalCharts: charts.length,
       deviationsFound: ExtensionState.deviationResults.length
     }).catch(err => {
-      console.error('Error sending message to popup:', err);
+      // Popup may not be open, this is normal
     });
 
-    console.log(`Scan complete. Found ${ExtensionState.deviationResults.length} deviations`);
+    console.log(`✅ Scan complete. Found ${ExtensionState.deviationResults.length} deviations in ${charts.length} charts`);
 
   } catch (error) {
     console.error('Error during deviation scan:', error);
@@ -208,35 +227,58 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // Auto-scan on page load - automatically detect deviations
 function autoScanIfChartsFound() {
+  console.log('🚀 Auto-scan triggered. Checking for charts...');
   const charts = ChartInteraction.findAllCharts();
+  console.log(`Chart detection result: ${charts.length} charts found`);
   if (charts.length > 0) {
     console.log(`✓ Found ${charts.length} charts. Starting automatic scan...`);
     performDeviationScan();
+  } else {
+    console.log('ℹ️ No charts found yet. Will monitor for new charts...');
   }
 }
 
-// Wait for page to be fully loaded
+// Multiple triggers for auto-scan to catch all loading scenarios
+console.log('📌 Looker Studio Funnel Deviation Pre-Scan extension loaded');
+
+// Trigger 1: Page load event
 if (document.readyState === 'loading') {
+  console.log('Page still loading, waiting for DOMContentLoaded...');
   document.addEventListener('DOMContentLoaded', autoScanIfChartsFound);
 } else {
-  // Page already loaded, scan immediately
-  setTimeout(autoScanIfChartsFound, 500);
+  console.log('Page already loaded, triggering scan immediately...');
+  autoScanIfChartsFound();
 }
+
+// Trigger 2: Delay for async rendering
+setTimeout(() => {
+  console.log('Triggering delayed scan (500ms) for async content...');
+  autoScanIfChartsFound();
+}, 500);
+
+// Trigger 3: Another delay for heavily async pages
+setTimeout(() => {
+  console.log('Triggering second delayed scan (2000ms) for heavily async pages...');
+  autoScanIfChartsFound();
+}, 2000);
 
 // Also scan when new charts are added to the page (dynamic content)
 const pageObserver = new MutationObserver((mutations) => {
   const hasNewCharts = mutations.some(m => {
     if (m.type === 'childList' && m.addedNodes.length > 0) {
       return Array.from(m.addedNodes).some(node => 
-        node.nodeType === 1 && node.querySelector?.('[data-ng-type="chart"]')
+        node.nodeType === 1 && (
+          node.querySelector?.('[data-ng-type="chart"]') ||
+          node.hasAttribute?.('data-ng-type') && node.getAttribute?.('data-ng-type') === 'chart'
+        )
       );
     }
     return false;
   });
   
   if (hasNewCharts && !ExtensionState.isScanning) {
-    console.log('✓ New charts detected. Running scan...');
-    performDeviationScan();
+    console.log('📊 New charts detected via mutation observer. Running scan...');
+    setTimeout(autoScanIfChartsFound, 300); // Small delay for chart to render
   }
 });
 
@@ -246,4 +288,4 @@ pageObserver.observe(document.body, {
   subtree: true
 });
 
-console.log('Looker Studio Funnel Deviation Pre-Scan extension loaded - Auto-scan enabled');
+console.log('✅ Extension fully initialized with auto-scan enabled');
