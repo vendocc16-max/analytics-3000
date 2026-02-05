@@ -61,6 +61,33 @@ function displayResults(results, totalCharts) {
 }
 
 /**
+ * Sends a message with retry logic
+ */
+async function sendMessageWithRetry(tabId, message, maxRetries = 3) {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    
+    function attempt() {
+      attempts++;
+      chrome.tabs.sendMessage(tabId, message, (response) => {
+        if (chrome.runtime.lastError) {
+          if (attempts < maxRetries) {
+            console.log(`Retry ${attempts}/${maxRetries}...`);
+            setTimeout(attempt, 500);
+          } else {
+            reject(new Error(chrome.runtime.lastError.message));
+          }
+        } else {
+          resolve(response);
+        }
+      });
+    }
+    
+    attempt();
+  });
+}
+
+/**
  * Starts the deviation scan
  */
 async function startScan() {
@@ -72,36 +99,37 @@ async function startScan() {
     // Get the active tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-    // Send message to content script
-    chrome.tabs.sendMessage(tab.id, { type: 'START_SCAN' }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error('Send message error:', chrome.runtime.lastError);
-        return;
-      }
-      // Response handler for initial ack
-    });
+    if (!tab) {
+      throw new Error('No active tab found');
+    }
+
+    // Try to send start scan message with retry
+    try {
+      await sendMessageWithRetry(tab.id, { type: 'START_SCAN' });
+    } catch (e) {
+      console.warn('Start scan message failed, continuing anyway...');
+    }
 
     // Wait for results
-    setTimeout(() => {
-      chrome.tabs.sendMessage(tab.id, { type: 'GET_ANALYSIS' }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('Get analysis error:', chrome.runtime.lastError);
-          UI.statusBadge.textContent = 'Error: Not a Looker Studio page';
-          UI.scanBtn.disabled = false;
-          return;
-        }
+    setTimeout(async () => {
+      try {
+        const response = await sendMessageWithRetry(tab.id, { type: 'GET_ANALYSIS' });
         if (response && response.results) {
           displayResults(response.results, response.results.length);
           UI.statusBadge.textContent = `Complete`;
           UI.statusBadge.className = 'status-badge';
         }
-        UI.scanBtn.disabled = false;
-      });
+      } catch (e) {
+        console.error('Analysis error:', e.message);
+        UI.statusBadge.textContent = 'Error: Extension not active on this page';
+        UI.statusBadge.className = 'status-badge error';
+      }
+      UI.scanBtn.disabled = false;
     }, 3000);
 
   } catch (error) {
     console.error('Error starting scan:', error);
-    UI.statusBadge.textContent = 'Error';
+    UI.statusBadge.textContent = 'Error: ' + error.message;
     UI.statusBadge.className = 'status-badge error';
     UI.scanBtn.disabled = false;
   }

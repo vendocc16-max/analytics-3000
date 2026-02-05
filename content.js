@@ -3,6 +3,8 @@
  * Orchestrates the funnel deviation pre-scan
  */
 
+console.log('✅ Content Script Loaded - Looker Studio Extension Active');
+
 // Global state
 const ExtensionState = {
   deviationResults: [],
