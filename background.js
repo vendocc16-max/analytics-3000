@@ -14,11 +14,18 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // Listen for tab updates
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  // Optionally auto-scan when a Looker Studio report loads
-  if (changeInfo.status === 'complete' && tab.url) {
-    if (tab.url.includes('looker.google.com') || tab.url.includes('datastudio.google.com')) {
+  try {
+    // Optionally auto-scan when a Looker Studio report loads
+    if (!tab || !changeInfo || changeInfo.status !== 'complete') {
+      return;
+    }
+    
+    const url = tab.url || '';
+    if (url.includes('looker.google.com') || url.includes('datastudio.google.com')) {
       // Could trigger auto-scan here if desired
     }
+  } catch (error) {
+    // Silently catch any errors - some tabs don't have URL access
   }
 });
 
