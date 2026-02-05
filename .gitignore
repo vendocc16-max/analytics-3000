@@ -1,0 +1,11 @@
+node_modules/
+.DS_Store
+*.crx
+*.pem
+dist/
+build/
+.env
+.env.local
+*.log
+.idea/
+.vscode/settings.json

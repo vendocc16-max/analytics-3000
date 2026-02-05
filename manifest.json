@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Looker Studio Funnel Deviation Pre-Scan",
+  "version": "1.0.0",
+  "description": "Automated deviation detection for Time Series charts in Looker Studio reports",
+  "permissions": [
+    "scripting",
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://looker.google.com/*",
+    "https://datastudio.google.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://looker.google.com/reporting/*",
+        "https://datastudio.google.com/reporting/*"
+      ],
+      "js": [
+        "svgParser.js",
+        "iqrAnalysis.js",
+        "chartInteraction.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Funnel Deviation Scan"
+  },
+  "icons": {
+    "16": "images/icon-16.png",
+    "48": "images/icon-48.png",
+    "128": "images/icon-128.png"
+  }
+}
