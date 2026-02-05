@@ -19,9 +19,10 @@
   "content_scripts": [
     {
       "matches": [
-        "https://looker.google.com/reporting/*",
-        "https://datastudio.google.com/reporting/*",
-        "https://looker.studio.google.com/*"
+        "https://looker.google.com/*",
+        "https://datastudio.google.com/*",
+        "https://looker.studio.google.com/*",
+        "https://*.studio.google.com/*"
       ],
       "js": [
         "svgParser.js",
@@ -29,7 +30,24 @@
         "chartInteraction.js",
         "content.js"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "svgParser.js",
+        "iqrAnalysis.js",
+        "chartInteraction.js",
+        "content.js"
+      ],
+      "matches": [
+        "https://looker.google.com/*",
+        "https://datastudio.google.com/*",
+        "https://looker.studio.google.com/*",
+        "https://*.studio.google.com/*"
+      ]
     }
   ],
   "action": {
