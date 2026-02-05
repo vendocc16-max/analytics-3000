@@ -25,16 +25,7 @@
         "chartInteraction.js",
         "content.js"
       ],
-      "run_at": "document_start"
-    },
-    {
-      "matches": [
-        "https://*/*"
-      ],
-      "js": [
-        "page-injector.js"
-      ],
-      "run_at": "document_start"
+      "run_at": "document_end"
     }
   ],
   "web_accessible_resources": [

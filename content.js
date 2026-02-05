@@ -269,51 +269,84 @@ function autoScanIfChartsFound() {
 // Multiple triggers for auto-scan to catch all loading scenarios
 console.log('📌 Looker Studio Funnel Deviation Pre-Scan extension loaded');
 
+// Trigger 0: Immediate scan attempt (in case everything is ready)
+try {
+  console.log('Attempting immediate scan...');
+  autoScanIfChartsFound();
+} catch (e) {
+  console.error('Immediate scan failed:', e);
+}
+
 // Trigger 1: Page load event
 if (document.readyState === 'loading') {
   console.log('Page still loading, waiting for DOMContentLoaded...');
-  document.addEventListener('DOMContentLoaded', autoScanIfChartsFound);
+  document.addEventListener('DOMContentLoaded', () => {
+    try {
+      autoScanIfChartsFound();
+    } catch (e) {
+      console.error('DOMContentLoaded scan failed:', e);
+    }
+  });
 } else {
   console.log('Page already loaded, triggering scan immediately...');
-  autoScanIfChartsFound();
+  try {
+    autoScanIfChartsFound();
+  } catch (e) {
+    console.error('Page ready scan failed:', e);
+  }
 }
 
 // Trigger 2: Delay for async rendering
 setTimeout(() => {
-  console.log('Triggering delayed scan (500ms) for async content...');
-  autoScanIfChartsFound();
+  try {
+    console.log('Triggering delayed scan (500ms) for async content...');
+    autoScanIfChartsFound();
+  } catch (e) {
+    console.error('Delayed scan failed:', e);
+  }
 }, 500);
 
 // Trigger 3: Another delay for heavily async pages
 setTimeout(() => {
-  console.log('Triggering second delayed scan (2000ms) for heavily async pages...');
-  autoScanIfChartsFound();
+  try {
+    console.log('Triggering second delayed scan (2000ms) for heavily async pages...');
+    autoScanIfChartsFound();
+  } catch (e) {
+    console.error('Second delayed scan failed:', e);
+  }
 }, 2000);
 
 // Also scan when new charts are added to the page (dynamic content)
 const pageObserver = new MutationObserver((mutations) => {
-  const hasNewCharts = mutations.some(m => {
-    if (m.type === 'childList' && m.addedNodes.length > 0) {
-      return Array.from(m.addedNodes).some(node => 
-        node.nodeType === 1 && (
-          node.querySelector?.('[data-ng-type="chart"]') ||
-          node.hasAttribute?.('data-ng-type') && node.getAttribute?.('data-ng-type') === 'chart'
-        )
-      );
+  try {
+    const hasNewCharts = mutations.some(m => {
+      if (m.type === 'childList' && m.addedNodes.length > 0) {
+        return Array.from(m.addedNodes).some(node => 
+          node.nodeType === 1 && (
+            node.querySelector?.('[data-ng-type="chart"]') ||
+            node.hasAttribute?.('data-ng-type') && node.getAttribute?.('data-ng-type') === 'chart'
+          )
+        );
+      }
+      return false;
+    });
+    
+    if (hasNewCharts && !ExtensionState.isScanning) {
+      console.log('📊 New charts detected via mutation observer. Running scan...');
+      setTimeout(autoScanIfChartsFound, 300); // Small delay for chart to render
     }
-    return false;
-  });
-  
-  if (hasNewCharts && !ExtensionState.isScanning) {
-    console.log('📊 New charts detected via mutation observer. Running scan...');
-    setTimeout(autoScanIfChartsFound, 300); // Small delay for chart to render
+  } catch (e) {
+    console.error('Mutation observer error:', e);
   }
 });
 
 // Start monitoring for new charts
-pageObserver.observe(document.body, {
-  childList: true,
-  subtree: true
-});
-
-console.log('✅ Extension fully initialized with auto-scan enabled');
+try {
+  pageObserver.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+  console.log('✅ Extension fully initialized with auto-scan enabled');
+} catch (e) {
+  console.error('Failed to start observer:', e);
+}
