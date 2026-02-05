@@ -206,11 +206,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Auto-scan on page load (optional - comment out to disable)
-// if (document.readyState === 'loading') {
-//   document.addEventListener('DOMContentLoaded', performDeviationScan);
-// } else {
-//   performDeviationScan();
-// }
+// Auto-scan on page load - automatically detect deviations
+function autoScanIfChartsFound() {
+  const charts = ChartInteraction.findAllCharts();
+  if (charts.length > 0) {
+    console.log(`✓ Found ${charts.length} charts. Starting automatic scan...`);
+    performDeviationScan();
+  }
+}
 
-console.log('Looker Studio Funnel Deviation Pre-Scan extension loaded');
+// Wait for page to be fully loaded
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', autoScanIfChartsFound);
+} else {
+  // Page already loaded, scan immediately
+  setTimeout(autoScanIfChartsFound, 500);
+}
+
+// Also scan when new charts are added to the page (dynamic content)
+const pageObserver = new MutationObserver((mutations) => {
+  const hasNewCharts = mutations.some(m => {
+    if (m.type === 'childList' && m.addedNodes.length > 0) {
+      return Array.from(m.addedNodes).some(node => 
+        node.nodeType === 1 && node.querySelector?.('[data-ng-type="chart"]')
+      );
+    }
+    return false;
+  });
+  
+  if (hasNewCharts && !ExtensionState.isScanning) {
+    console.log('✓ New charts detected. Running scan...');
+    performDeviationScan();
+  }
+});
+
+// Start monitoring for new charts
+pageObserver.observe(document.body, {
+  childList: true,
+  subtree: true
+});
+
+console.log('Looker Studio Funnel Deviation Pre-Scan extension loaded - Auto-scan enabled');
