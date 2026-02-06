@@ -21,43 +21,95 @@ const ExtensionState = {
   chartAnalysis: new Map()
 };
 
+// Auto-scan state
+let autoScanAttempts = 0;
+const MAX_AUTO_SCAN_ATTEMPTS = 15;
+let autoScanTimerId = null;
+let autoScanCompleted = false;
+let mutationScanDebounce = null;
+
+/**
+ * Checks whether charts with rendered SVG paths exist on the page.
+ * findAllCharts() only returns charts that contain an <svg>, but the SVG
+ * may be empty (no <path> elements yet). This function goes one step
+ * further and checks for actual rendered path data.
+ */
+function findChartsWithRenderedSVG() {
+  const charts = ChartInteraction.findAllCharts();
+  return charts.filter(chart => {
+    const svg = chart.querySelector('svg');
+    return svg && svg.querySelectorAll('path[d]').length > 0;
+  });
+}
+
+/**
+ * Polls for charts with exponential backoff until rendered SVGs are found.
+ */
+function autoScanWithRetry() {
+  if (autoScanCompleted || ExtensionState.isScanning) return;
+
+  autoScanAttempts++;
+  console.log(`Auto-scan attempt ${autoScanAttempts}/${MAX_AUTO_SCAN_ATTEMPTS}...`);
+
+  const readyCharts = findChartsWithRenderedSVG();
+  console.log(`Chart detection: ${readyCharts.length} charts with rendered SVGs found`);
+
+  if (readyCharts.length > 0) {
+    autoScanCompleted = true;
+    console.log(`Found ${readyCharts.length} rendered charts. Starting automatic scan...`);
+    performDeviationScan();
+    return;
+  }
+
+  if (autoScanAttempts >= MAX_AUTO_SCAN_ATTEMPTS) {
+    console.log('Max auto-scan attempts reached. Charts may not be present on this page.');
+    console.log('Use the popup "Start Scan" button to scan manually.');
+    return;
+  }
+
+  // Exponential backoff: 1s, 1.5s, 2.25s, ... capped at 5s
+  const delay = Math.min(1000 * Math.pow(1.5, autoScanAttempts - 1), 5000);
+  console.log(`No rendered charts yet. Retrying in ${Math.round(delay)}ms...`);
+  autoScanTimerId = setTimeout(autoScanWithRetry, delay);
+}
+
 /**
  * Analyzes a single chart for deviations
  */
 async function analyzeChart(chartContainer) {
   try {
     const chartTitle = ChartInteraction.getChartTitle(chartContainer);
-    
+
     // Wait for SVG to render
     const svg = await ChartInteraction.waitForSVGRender(chartContainer, 5000);
-    
+
     // Extract data series from SVG
     const series = SVGParser.extractDataSeries(svg);
-    
+
     if (series.length === 0) {
       console.warn(`No data series found in chart: ${chartTitle}`);
       return null;
     }
 
     const svgBounds = SVGParser.getSVGBounds(svg);
-    
+
     // Analyze each series
     const analysisResults = [];
-    
+
     for (const s of series) {
       if (s.coordinates.length < 4) continue; // Need sufficient data points
 
       // Extract y-values from coordinates
       const yValues = s.coordinates.map(coord => coord.y);
-      
+
       // Get the latest data point
       const latestPoint = SVGParser.getLatestDataPoint(s.coordinates);
-      
+
       if (!latestPoint) continue;
 
       // Perform IQR analysis
       const analysis = IQRAnalysis.analyzeDeviation(yValues, latestPoint.y);
-      
+
       analysisResults.push({
         chartTitle,
         seriesType: s.type,
@@ -69,11 +121,11 @@ async function analyzeChart(chartContainer) {
 
     // Check if any series has deviation
     const hasDeviation = analysisResults.some(r => r.isDeviation);
-    
+
     if (hasDeviation) {
       // Highlight the chart
       ChartInteraction.highlightChart(chartContainer, '#FF0000', 3);
-      
+
       analysisResults.forEach(result => {
         if (result.isDeviation) {
           ExtensionState.deviationResults.push({
@@ -90,7 +142,7 @@ async function analyzeChart(chartContainer) {
 
     // Store analysis
     ExtensionState.chartAnalysis.set(chartTitle, analysisResults);
-    
+
     return {
       chartTitle,
       hasDeviation,
@@ -108,7 +160,7 @@ async function analyzeChart(chartContainer) {
  */
 async function performDeviationScan() {
   if (ExtensionState.isScanning) return;
-  
+
   ExtensionState.isScanning = true;
   ExtensionState.deviationResults = [];
   ExtensionState.chartAnalysis.clear();
@@ -116,9 +168,9 @@ async function performDeviationScan() {
   try {
     // Find all charts on the page
     const charts = ChartInteraction.findAllCharts();
-    
+
     console.log(`🔍 Extension scan initiated. Searching for charts...`);
-    
+
     if (charts.length === 0) {
       console.warn('⚠️ No charts found on this page');
       ExtensionState.isScanning = false;
@@ -130,7 +182,7 @@ async function performDeviationScan() {
     // Analyze each chart
     for (const chart of charts) {
       const result = await analyzeChart(chart);
-      
+
       // If deviation found, automatically drill down
       if (result && result.hasDeviation) {
         console.log(`📊 Deviation detected in: ${result.chartTitle}. Executing drill-down...`);
@@ -138,7 +190,7 @@ async function performDeviationScan() {
           // Click the chart to select it
           chart.click();
           await new Promise(resolve => setTimeout(resolve, 300));
-          
+
           // Perform the drill-down automation
           await automateMetricAndDrillDown(chart, 'CVR', 'Week');
           console.log(`✓ Drill-down complete for: ${result.chartTitle}`);
@@ -146,7 +198,7 @@ async function performDeviationScan() {
           console.log(`ℹ️ Drill-down not available for this chart (manual interaction may be needed)`);
         }
       }
-      
+
       // Small delay between charts to prevent UI blocking
       await new Promise(resolve => setTimeout(resolve, 500));
     }
@@ -182,7 +234,7 @@ async function automateMetricAndDrillDown(chartContainer, metric = 'CVR', granul
     // Step 1: Select optional metric
     console.log(`Selecting metric: ${metric}`);
     const metricsClicked = await ChartInteraction.clickOptionalMetricsMenu(chartContainer);
-    
+
     if (metricsClicked) {
       await ChartInteraction.selectMetric(metric);
       await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for chart to update
@@ -191,7 +243,7 @@ async function automateMetricAndDrillDown(chartContainer, metric = 'CVR', granul
     // Step 2: Drill down to granularity
     console.log(`Setting granularity to: ${granularity}`);
     const drillClicked = await ChartInteraction.clickDrillDownButton(chartContainer);
-    
+
     if (drillClicked) {
       await ChartInteraction.selectGranularity(granularity);
       await new Promise(resolve => setTimeout(resolve, 1500)); // Wait for chart to re-render
@@ -215,8 +267,16 @@ function clearAllHighlights() {
   });
 }
 
+// Store results in local storage whenever they update
+function storeResultsInStorage() {
+  chrome.storage.local.set({
+    deviationResults: ExtensionState.deviationResults,
+    lastScanTime: new Date().toISOString()
+  });
+}
+
 /**
- * Listens for messages from popup
+ * Listens for messages from popup and background script
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Ping for diagnostics
@@ -226,6 +286,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'START_SCAN') {
+    // Manual scan from popup - reset the auto-scan guard so it can run
+    autoScanCompleted = false;
     performDeviationScan().then(() => {
       sendResponse({ status: 'scanning' });
     });
@@ -243,110 +305,85 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       analysis: Array.from(ExtensionState.chartAnalysis.entries())
     });
   }
+
+  if (request.type === 'SPA_NAVIGATION') {
+    console.log('SPA navigation detected. Resetting and re-scanning...');
+    autoScanCompleted = false;
+    autoScanAttempts = 0;
+    clearTimeout(autoScanTimerId);
+    clearTimeout(mutationScanDebounce);
+    ExtensionState.isScanning = false;
+    ExtensionState.deviationResults = [];
+    ExtensionState.chartAnalysis.clear();
+    clearAllHighlights();
+    autoScanWithRetry();
+    sendResponse({ status: 'rescan_started' });
+    return true;
+  }
 });
 
-// Store results in local storage whenever they update
-function storeResultsInStorage() {
-  chrome.storage.local.set({
-    deviationResults: ExtensionState.deviationResults,
-    lastScanTime: new Date().toISOString()
-  });
-}
+// --- Initialization ---
 
-// Auto-scan on page load - automatically detect deviations
-function autoScanIfChartsFound() {
-  console.log('🚀 Auto-scan triggered. Checking for charts...');
-  const charts = ChartInteraction.findAllCharts();
-  console.log(`Chart detection result: ${charts.length} charts found`);
-  if (charts.length > 0) {
-    console.log(`✓ Found ${charts.length} charts. Starting automatic scan...`);
-    performDeviationScan();
-  } else {
-    console.log('ℹ️ No charts found yet. Will monitor for new charts...');
-  }
-}
+console.log('Looker Studio Funnel Deviation Pre-Scan extension loaded');
 
-// Multiple triggers for auto-scan to catch all loading scenarios
-console.log('📌 Looker Studio Funnel Deviation Pre-Scan extension loaded');
-
-// Trigger 0: Immediate scan attempt (in case everything is ready)
+// Start the polling-based auto-scan
 try {
-  console.log('Attempting immediate scan...');
-  autoScanIfChartsFound();
+  autoScanWithRetry();
 } catch (e) {
-  console.error('Immediate scan failed:', e);
+  console.error('Auto-scan failed:', e);
 }
 
-// Trigger 1: Page load event
-if (document.readyState === 'loading') {
-  console.log('Page still loading, waiting for DOMContentLoaded...');
-  document.addEventListener('DOMContentLoaded', () => {
-    try {
-      autoScanIfChartsFound();
-    } catch (e) {
-      console.error('DOMContentLoaded scan failed:', e);
-    }
-  });
-} else {
-  console.log('Page already loaded, triggering scan immediately...');
-  try {
-    autoScanIfChartsFound();
-  } catch (e) {
-    console.error('Page ready scan failed:', e);
-  }
-}
-
-// Trigger 2: Delay for async rendering
-setTimeout(() => {
-  try {
-    console.log('Triggering delayed scan (500ms) for async content...');
-    autoScanIfChartsFound();
-  } catch (e) {
-    console.error('Delayed scan failed:', e);
-  }
-}, 500);
-
-// Trigger 3: Another delay for heavily async pages
-setTimeout(() => {
-  try {
-    console.log('Triggering second delayed scan (2000ms) for heavily async pages...');
-    autoScanIfChartsFound();
-  } catch (e) {
-    console.error('Second delayed scan failed:', e);
-  }
-}, 2000);
-
-// Also scan when new charts are added to the page (dynamic content)
+// MutationObserver: watch for SVG paths being rendered inside chart containers.
+// This catches both new chart containers being added AND existing containers
+// getting their SVG content populated after async data loads.
 const pageObserver = new MutationObserver((mutations) => {
+  if (autoScanCompleted || ExtensionState.isScanning) return;
+
   try {
-    const hasNewCharts = mutations.some(m => {
-      if (m.type === 'childList' && m.addedNodes.length > 0) {
-        return Array.from(m.addedNodes).some(node => 
-          node.nodeType === 1 && (
-            node.querySelector?.('[data-ng-type="chart"]') ||
-            node.hasAttribute?.('data-ng-type') && node.getAttribute?.('data-ng-type') === 'chart'
-          )
-        );
-      }
-      return false;
+    const hasChartChanges = mutations.some(m => {
+      if (m.type !== 'childList' || m.addedNodes.length === 0) return false;
+      return Array.from(m.addedNodes).some(node => {
+        if (node.nodeType !== 1) return false;
+        // A new chart container was added
+        if (node.querySelector?.('[data-ng-type="chart"]') ||
+            (node.hasAttribute?.('data-ng-type') && node.getAttribute('data-ng-type') === 'chart')) {
+          return true;
+        }
+        // An SVG or path was added inside an existing chart container
+        if (node.tagName === 'svg' || node.tagName === 'path' ||
+            node.querySelector?.('svg path[d]')) {
+          const closestChart = node.closest?.('[data-ng-type="chart"]');
+          return closestChart !== null;
+        }
+        return false;
+      });
     });
-    
-    if (hasNewCharts && !ExtensionState.isScanning) {
-      console.log('📊 New charts detected via mutation observer. Running scan...');
-      setTimeout(autoScanIfChartsFound, 300); // Small delay for chart to render
+
+    if (hasChartChanges) {
+      // Debounce: charts render in bursts, wait for them to settle
+      clearTimeout(mutationScanDebounce);
+      mutationScanDebounce = setTimeout(() => {
+        const readyCharts = findChartsWithRenderedSVG();
+        if (readyCharts.length > 0 && !autoScanCompleted && !ExtensionState.isScanning) {
+          console.log(`MutationObserver: ${readyCharts.length} charts now have rendered SVGs. Scanning...`);
+          autoScanCompleted = true;
+          clearTimeout(autoScanTimerId);
+          performDeviationScan();
+        }
+      }, 500);
     }
   } catch (e) {
     console.error('Mutation observer error:', e);
   }
 });
 
-// Start monitoring for new charts
+// Start monitoring for chart rendering
 try {
-  pageObserver.observe(document.body, {
+  pageObserver.observe(document.body || document.documentElement, {
     childList: true,
     subtree: true
   });
-  console.log('✅ Extension fully initialized with auto-scan enabled');
+  console.log('Extension fully initialized with auto-scan enabled');
 } catch (e) {
   console.error('Failed to start observer:', e);
 }
