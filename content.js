@@ -377,13 +377,30 @@ const pageObserver = new MutationObserver((mutations) => {
   }
 });
 
-// Start monitoring for chart rendering
+// Start monitoring for chart rendering.
+// document.body may not exist yet if injected at document_start, so wait for it.
+function startObserver() {
+  const target = document.body || document.documentElement;
+  if (target) {
+    pageObserver.observe(target, {
+      childList: true,
+      subtree: true
+    });
+    console.log('Extension fully initialized with auto-scan enabled');
+  } else {
+    // Body not ready yet — wait and retry
+    document.addEventListener('DOMContentLoaded', () => {
+      pageObserver.observe(document.body || document.documentElement, {
+        childList: true,
+        subtree: true
+      });
+      console.log('Extension fully initialized with auto-scan enabled (after DOMContentLoaded)');
+    });
+  }
+}
+
 try {
-  pageObserver.observe(document.body || document.documentElement, {
-    childList: true,
-    subtree: true
-  });
-  console.log('Extension fully initialized with auto-scan enabled');
+  startObserver();
 } catch (e) {
   console.error('Failed to start observer:', e);
 }

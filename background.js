@@ -48,16 +48,22 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     chrome.tabs.create({ url: 'popup.html' });
   }
 
-  // On install or update, inject into any already-open Looker Studio tabs
+  // On install or update, inject into any already-open Looker Studio tabs.
+  // Small delay to let the extension fully initialize before injecting.
   if (details.reason === 'install' || details.reason === 'update') {
-    try {
-      const tabs = await chrome.tabs.query({ url: ['https://lookerstudio.google.com/*', 'https://datastudio.google.com/*'] });
-      for (const tab of tabs) {
-        injectContentScripts(tab.id);
+    setTimeout(async () => {
+      try {
+        const tabs = await chrome.tabs.query({});
+        const lookerTabs = tabs.filter(t => t.url && isLookerStudioUrl(t.url));
+        console.log(`Found ${lookerTabs.length} open Looker Studio tab(s)`);
+        for (const tab of lookerTabs) {
+          console.log(`Injecting into tab ${tab.id}: ${tab.url}`);
+          injectContentScripts(tab.id);
+        }
+      } catch (error) {
+        console.error('Error injecting into existing tabs:', error);
       }
-    } catch (error) {
-      console.error('Error injecting into existing tabs:', error);
-    }
+    }, 1000);
   }
 });
 
