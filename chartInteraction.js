@@ -9,15 +9,17 @@ const ChartInteraction = {
    * @returns {Array<Element>} Array of chart widget elements
    */
   findAllCharts() {
-    // Looker Studio chart containers have data-ng-type="chart"
-    const charts = document.querySelectorAll('[data-ng-type="chart"]');
-    const chartArray = Array.from(charts);
+    // Looker Studio's current DOM uses ng2-canvas-component as chart containers.
+    // Line/time-series charts have the class "simple-linechart".
+    // We also check the legacy selector for backwards compatibility.
+    const modernCharts = document.querySelectorAll('ng2-canvas-component.simple-linechart');
+    const legacyCharts = document.querySelectorAll('[data-ng-type="chart"]');
 
-    // Filter for Time Series or Line charts
-    return chartArray.filter((chart) => {
-      const title = chart.querySelector('[data-ng-type="chart-title"]');
+    const allCharts = new Set([...modernCharts, ...legacyCharts]);
+
+    // Filter for charts that contain rendered SVGs
+    return Array.from(allCharts).filter((chart) => {
       const svg = chart.querySelector('svg');
-      // Include if has SVG (indicating it's a line/time series chart)
       return svg !== null;
     });
   },
@@ -66,18 +68,18 @@ const ChartInteraction = {
    * @param {Element} chartContainer - The chart widget element
    */
   revealChartControls(chartContainer) {
-    const header = chartContainer.querySelector('[data-ng-type="chart-header"]') ||
-                   chartContainer.querySelector('.goog-date-picker-button') ||
-                   chartContainer.querySelector('[role="heading"]')?.parentElement;
-    
-    if (header) {
-      const event = new MouseEvent('mouseover', {
-        view: window,
-        bubbles: true,
-        cancelable: true
-      });
-      header.dispatchEvent(event);
-    }
+    // Try multiple selectors for the chart header area
+    const header = chartContainer.querySelector('.component-body') ||
+                   chartContainer.querySelector('.component') ||
+                   chartContainer.querySelector('[role="heading"]')?.parentElement ||
+                   chartContainer;
+
+    const event = new MouseEvent('mouseover', {
+      view: window,
+      bubbles: true,
+      cancelable: true
+    });
+    header.dispatchEvent(event);
   },
 
   /**
@@ -230,9 +232,32 @@ const ChartInteraction = {
    * @returns {string} Chart title
    */
   getChartTitle(chartContainer) {
+    // Try modern Looker Studio selectors first
     const titleElement = chartContainer.querySelector(
-      '[data-ng-type="chart-title"], [role="heading"], .chart-title'
+      '[role="heading"], .chart-title, .component-title'
     );
-    return titleElement?.textContent?.trim() || 'Unknown Chart';
+    if (titleElement?.textContent?.trim()) {
+      return titleElement.textContent.trim();
+    }
+
+    // Try the lego-component class which contains a unique ID (e.g., "cd-n0q4vpx9pd")
+    const legoComp = chartContainer.querySelector('.lego-component') || chartContainer;
+    const classList = legoComp.className || '';
+    const idMatch = classList.match(/cd-\w+/);
+    if (idMatch) {
+      return `Chart ${idMatch[0]}`;
+    }
+
+    // Fallback: look for nearby section titles by walking up the DOM
+    let parent = chartContainer.parentElement;
+    for (let i = 0; i < 5 && parent; i++) {
+      const prev = parent.previousElementSibling;
+      if (prev && prev.textContent.trim().length < 60 && prev.textContent.trim().length > 0) {
+        return prev.textContent.trim();
+      }
+      parent = parent.parentElement;
+    }
+
+    return 'Unknown Chart';
   }
 };

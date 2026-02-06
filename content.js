@@ -344,15 +344,18 @@ const pageObserver = new MutationObserver((mutations) => {
       if (m.type !== 'childList' || m.addedNodes.length === 0) return false;
       return Array.from(m.addedNodes).some(node => {
         if (node.nodeType !== 1) return false;
-        // A new chart container was added
-        if (node.querySelector?.('[data-ng-type="chart"]') ||
-            (node.hasAttribute?.('data-ng-type') && node.getAttribute('data-ng-type') === 'chart')) {
+        // A new chart container was added (modern or legacy selectors)
+        if (node.querySelector?.('ng2-canvas-component.simple-linechart') ||
+            node.querySelector?.('[data-ng-type="chart"]') ||
+            (node.tagName === 'NG2-CANVAS-COMPONENT' && node.classList?.contains('simple-linechart'))) {
           return true;
         }
         // An SVG or path was added inside an existing chart container
         if (node.tagName === 'svg' || node.tagName === 'path' ||
+            node.tagName === 'SVG' || node.tagName === 'PATH' ||
             node.querySelector?.('svg path[d]')) {
-          const closestChart = node.closest?.('[data-ng-type="chart"]');
+          const closestChart = node.closest?.('ng2-canvas-component.simple-linechart') ||
+                               node.closest?.('[data-ng-type="chart"]');
           return closestChart !== null;
         }
         return false;
