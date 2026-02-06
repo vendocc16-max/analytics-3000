@@ -3,12 +3,61 @@
  * Handles extension lifecycle and persistent state
  */
 
-// Listen for extension installation
-chrome.runtime.onInstalled.addListener((details) => {
+/**
+ * Injects content scripts into a Looker Studio tab programmatically.
+ * This is needed when the extension is installed/updated while Looker Studio
+ * tabs are already open — declarative content_scripts in manifest.json only
+ * inject on NEW page loads, not into already-open tabs.
+ */
+async function injectContentScripts(tabId) {
+  try {
+    // Check if content script is already running
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'PING' }).catch(() => null);
+    if (response && response.status === 'pong') {
+      console.log(`Content script already active in tab ${tabId}`);
+      return;
+    }
+  } catch (e) {
+    // Content script not running, proceed with injection
+  }
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['svgParser.js', 'iqrAnalysis.js', 'chartInteraction.js', 'content.js']
+    });
+    console.log(`Content scripts injected into tab ${tabId}`);
+  } catch (error) {
+    console.error(`Failed to inject into tab ${tabId}:`, error);
+  }
+}
+
+function isLookerStudioUrl(url) {
+  return url && (
+    url.includes('lookerstudio.google.com') ||
+    url.includes('looker.google.com') ||
+    url.includes('datastudio.google.com')
+  );
+}
+
+// Listen for extension installation or update
+chrome.runtime.onInstalled.addListener(async (details) => {
+  console.log(`Extension ${details.reason}`);
+
   if (details.reason === 'install') {
-    console.log('Extension installed');
-    // Could open onboarding page here
     chrome.tabs.create({ url: 'popup.html' });
+  }
+
+  // On install or update, inject into any already-open Looker Studio tabs
+  if (details.reason === 'install' || details.reason === 'update') {
+    try {
+      const tabs = await chrome.tabs.query({ url: ['https://lookerstudio.google.com/*', 'https://datastudio.google.com/*'] });
+      for (const tab of tabs) {
+        injectContentScripts(tab.id);
+      }
+    } catch (error) {
+      console.error('Error injecting into existing tabs:', error);
+    }
   }
 });
 

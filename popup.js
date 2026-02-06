@@ -76,18 +76,38 @@ async function startScan() {
       throw new Error('No active tab found');
     }
 
-    // Try to send message to content script, but suppress errors
-    chrome.tabs.sendMessage(tab.id, { type: 'START_SCAN' }, (response) => {
-      // Suppress chrome.runtime.lastError
+    // Try to send message to content script
+    chrome.tabs.sendMessage(tab.id, { type: 'START_SCAN' }, async (response) => {
       if (chrome.runtime.lastError) {
-        console.debug('Content script not responding (expected if not a Looker page)');
+        console.debug('Content script not responding. Attempting to inject...');
+        UI.statusBadge.textContent = 'Injecting...';
+
+        // Content script isn't running — inject it programmatically
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['svgParser.js', 'iqrAnalysis.js', 'chartInteraction.js', 'content.js']
+          });
+          console.log('Content scripts injected. Waiting for auto-scan...');
+
+          // Give the content script time to initialize and auto-scan
+          setTimeout(() => {
+            checkLocalStorage();
+          }, 8000);
+        } catch (injectError) {
+          console.error('Failed to inject content scripts:', injectError);
+          UI.statusBadge.textContent = 'Error: Cannot inject into this page';
+          UI.statusBadge.className = 'status-badge error';
+          UI.scanBtn.disabled = false;
+        }
+        return;
       }
     });
 
     // Wait a moment for scan to complete, then check local storage
     setTimeout(() => {
       checkLocalStorage();
-    }, 3000);
+    }, 5000);
 
   } catch (error) {
     console.error('Error starting scan:', error);
