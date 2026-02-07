@@ -1,6 +1,7 @@
 /**
  * Popup Script
- * Manages the extension popup UI
+ * Uses chrome.scripting.executeScript to inject scan directly into the active tab.
+ * No content script message passing needed.
  */
 
 const UI = {
@@ -16,11 +17,11 @@ const UI = {
  * Updates the UI with results
  */
 function displayResults(results, totalCharts) {
-  if (results.length === 0) {
+  if (!results || results.length === 0) {
     UI.resultsContainer.innerHTML = `
       <div class="empty-state">
         <div class="empty-state-icon">✅</div>
-        <div>No deviations detected. All metrics are within normal range.</div>
+        <div>No deviations detected in ${totalCharts || 0} chart(s). All metrics within normal range.</div>
       </div>
     `;
     UI.totalChartsDisplay.textContent = totalCharts || '-';
@@ -28,10 +29,9 @@ function displayResults(results, totalCharts) {
     return;
   }
 
-  // Sort by severity (highest first)
   const sorted = [...results].sort((a, b) => (b.severity || 0) - (a.severity || 0));
 
-  const html = sorted.map((result, index) => {
+  const html = sorted.map((result) => {
     const severityPercent = Math.min((result.severity / 10) * 100, 100);
     const typeIcon = result.deviationType === 'positive' ? '📈' : '📉';
 
@@ -61,132 +61,107 @@ function displayResults(results, totalCharts) {
 }
 
 /**
- * Starts the deviation scan
+ * Starts the deviation scan by injecting scan.js into the active tab
  */
 async function startScan() {
   UI.scanBtn.disabled = true;
   UI.statusBadge.textContent = 'Scanning...';
   UI.statusBadge.className = 'status-badge active';
+  UI.resultsContainer.innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state-icon">⏳</div>
+      <div>Scanning charts on this page...</div>
+    </div>
+  `;
 
   try {
-    // Get the active tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
     if (!tab) {
       throw new Error('No active tab found');
     }
 
-    // Try to send message to content script
-    chrome.tabs.sendMessage(tab.id, { type: 'START_SCAN' }, async (response) => {
-      if (chrome.runtime.lastError) {
-        console.debug('Content script not responding. Attempting to inject...');
-        UI.statusBadge.textContent = 'Injecting...';
-
-        // Content script isn't running — inject it programmatically
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ['svgParser.js', 'iqrAnalysis.js', 'chartInteraction.js', 'content.js']
-          });
-          console.log('Content scripts injected. Waiting for auto-scan...');
-
-          // Give the content script time to initialize and auto-scan
-          setTimeout(() => {
-            checkLocalStorage();
-          }, 8000);
-        } catch (injectError) {
-          console.error('Failed to inject content scripts:', injectError);
-          UI.statusBadge.textContent = 'Error: Cannot inject into this page';
-          UI.statusBadge.className = 'status-badge error';
-          UI.scanBtn.disabled = false;
-        }
-        return;
-      }
+    // Inject and execute scan.js directly into the page
+    const injectionResults = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['scan.js']
     });
 
-    // Wait a moment for scan to complete, then check local storage
+    console.log('Injection result:', injectionResults);
+
+    // Give it a moment for storage to be written
     setTimeout(() => {
-      checkLocalStorage();
-    }, 5000);
+      chrome.storage.local.get(['deviationResults', 'scanInfo'], (data) => {
+        const results = data.deviationResults || [];
+        const info = data.scanInfo || {};
+
+        console.log('Storage results:', results);
+        console.log('Scan info:', info);
+
+        if (info.totalCharts === 0 && info.totalSvgs === 0) {
+          UI.resultsContainer.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state-icon">⚠️</div>
+              <div>No SVG charts found on this page. Make sure charts are visible and loaded.</div>
+            </div>
+          `;
+          UI.statusBadge.textContent = 'No charts found';
+          UI.statusBadge.className = 'status-badge';
+        } else if (results.length === 0) {
+          displayResults([], info.totalCharts);
+          UI.statusBadge.textContent = `${info.totalCharts} charts OK`;
+          UI.statusBadge.className = 'status-badge';
+        } else {
+          displayResults(results, info.totalCharts);
+          UI.statusBadge.textContent = `${results.length} deviations`;
+          UI.statusBadge.className = 'status-badge error';
+        }
+
+        UI.scanBtn.disabled = false;
+      });
+    }, 1000);
 
   } catch (error) {
-    console.error('Error starting scan:', error);
-    UI.statusBadge.textContent = 'Error: ' + error.message;
+    console.error('Scan error:', error);
+    UI.statusBadge.textContent = 'Error';
     UI.statusBadge.className = 'status-badge error';
+    UI.resultsContainer.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">❌</div>
+        <div>Error: ${error.message}</div>
+      </div>
+    `;
     UI.scanBtn.disabled = false;
   }
 }
 
 /**
- * Check local storage for results (content script stores them there)
+ * Clears results
  */
-function checkLocalStorage() {
-  chrome.storage.local.get('deviationResults', (data) => {
-    if (data.deviationResults && data.deviationResults.length > 0) {
-      displayResults(data.deviationResults, data.deviationResults.length);
-      UI.statusBadge.textContent = `${data.deviationResults.length} deviations found`;
-      UI.statusBadge.className = data.deviationResults.length > 0 ? 'status-badge error' : 'status-badge';
-    } else {
-      UI.resultsContainer.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state-icon">📋</div>
-          <div>No results yet. Make sure you're on a Looker Studio page.</div>
-        </div>
-      `;
-      UI.statusBadge.textContent = 'No results';
-    }
-    UI.scanBtn.disabled = false;
+function clearResults() {
+  chrome.storage.local.remove(['deviationResults', 'scanInfo'], () => {
+    UI.resultsContainer.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">📋</div>
+        <div>Cleared. Click "Start Scan" to run again.</div>
+      </div>
+    `;
+    UI.totalChartsDisplay.textContent = '-';
+    UI.deviationsCountDisplay.textContent = '0';
+    UI.statusBadge.textContent = 'Ready';
+    UI.statusBadge.className = 'status-badge';
   });
 }
-
-/**
- * Clears highlights and results
- */
-async function clearResults() {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
-    chrome.tabs.sendMessage(tab.id, { type: 'CLEAR_HIGHLIGHTS' }, (response) => {
-      // Ignore errors
-    });
-
-    // Clear storage
-    chrome.storage.local.remove('deviationResults', () => {
-      UI.resultsContainer.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state-icon">📋</div>
-          <div>Cleared. Click "Start Scan" to run again.</div>
-        </div>
-      `;
-      UI.totalChartsDisplay.textContent = '-';
-      UI.deviationsCountDisplay.textContent = '0';
-      UI.statusBadge.textContent = 'Ready';
-    });
-
-  } catch (error) {
-    console.error('Error clearing:', error);
-  }
-}
-
-/**
- * Listen for messages from content script
- */
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.type === 'DEVIATION_SCAN_COMPLETE') {
-    displayResults(request.results, request.totalCharts);
-    UI.statusBadge.textContent = `${request.deviationsFound} found`;
-    UI.statusBadge.className = request.deviationsFound > 0 ? 'status-badge error' : 'status-badge';
-    UI.scanBtn.disabled = false;
-  }
-});
 
 // Event listeners
 if (UI.scanBtn) UI.scanBtn.addEventListener('click', startScan);
 if (UI.clearBtn) UI.clearBtn.addEventListener('click', clearResults);
 
-// Load last scan results on popup open
-chrome.storage.local.get('deviationResults', (data) => {
+// Load previous results on popup open
+chrome.storage.local.get(['deviationResults', 'scanInfo'], (data) => {
   if (data.deviationResults && data.deviationResults.length > 0) {
-    displayResults(data.deviationResults, data.deviationResults.length);
+    displayResults(data.deviationResults, data.scanInfo?.totalCharts);
+    UI.statusBadge.textContent = `${data.deviationResults.length} deviations`;
+    UI.statusBadge.className = 'status-badge error';
   }
 });
