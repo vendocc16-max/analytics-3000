@@ -333,30 +333,74 @@
   }
 
   /** Find and click a menu item by text */
-  async function clickMenuItem(text, timeoutMs = 3000) {
-    const menuItem = await waitForElement(() => {
-      const candidates = document.querySelectorAll(
-        '[role="menuitem"], [role="option"], .goog-menuitem, .goog-menuitem-content'
+  async function clickMenuItem(text, timeoutMs = 4000) {
+    // After clicking a button, Looker Studio may render menus using various DOM patterns.
+    // Log what appears so we can diagnose which selectors work.
+    const dumpNewElements = () => {
+      // Look for any popup/overlay/menu that appeared
+      const popups = document.querySelectorAll(
+        '[role="menu"], [role="listbox"], [role="dialog"], .cdk-overlay-container, ' +
+        '.goog-menu, .goog-popup, .dropdown-menu, [class*="menu"], [class*="popup"], ' +
+        '[class*="overlay"], [class*="dropdown"], [class*="drill"]'
       );
-      for (const item of candidates) {
-        const itemText = item.textContent.trim();
-        if (itemText === text || itemText.includes(text)) {
-          return item;
-        }
+      if (popups.length > 0) {
+        console.log(`  [drill-down] Found ${popups.length} popup/menu elements after click:`);
+        popups.forEach((p, i) => {
+          const children = p.querySelectorAll('*');
+          const textContent = p.textContent?.trim()?.substring(0, 200) || '';
+          console.log(`    popup[${i}]: <${p.tagName}> role="${p.getAttribute('role') || ''}" class="${p.className?.toString()?.substring(0, 100) || ''}" children=${children.length} text="${textContent}"`);
+        });
+      }
+    };
+
+    // Try to find the menu item with broad selectors
+    const menuItem = await waitForElement(() => {
+      // Broad search: any clickable-looking element containing the target text
+      const selectors = [
+        '[role="menuitem"]', '[role="option"]', '[role="listitem"]',
+        '.goog-menuitem', '.goog-menuitem-content',
+        '.cdk-overlay-container *',
+        '[class*="menu-item"]', '[class*="menuitem"]',
+        '[class*="dropdown"] li', '[class*="dropdown"] div',
+        '[class*="option"]',
+        'mat-option', 'li', '[role="menu"] *'
+      ];
+
+      for (const sel of selectors) {
+        try {
+          const candidates = document.querySelectorAll(sel);
+          for (const item of candidates) {
+            const itemText = item.textContent.trim();
+            if (itemText === text || itemText.includes(text)) {
+              return item;
+            }
+          }
+        } catch (e) { /* skip invalid selectors */ }
       }
       return null;
-    }, timeoutMs);
+    }, timeoutMs).catch(err => {
+      // On timeout, dump what's in the DOM so we can diagnose
+      console.log(`  [drill-down] Menu item "${text}" not found. Dumping visible popups...`);
+      dumpNewElements();
+      throw err;
+    });
 
     menuItem.click();
     return true;
   }
 
-  /** Dismiss any open menus/popups */
+  /** Dismiss any open menus/popups (safe — no Escape key dispatch) */
   function dismissOpenMenus() {
-    document.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true
-    }));
-    document.body.click();
+    try {
+      // Click on an empty area to close menus, avoiding Escape which crashes Looker Studio
+      const overlay = document.querySelector('.cdk-overlay-backdrop, .goog-modalpopup-bg');
+      if (overlay) overlay.click();
+      // Fallback: click the report body area
+      const reportBody = document.querySelector('.reportArea, .canvasArea, [data-ng-type="report"]');
+      if (reportBody) reportBody.click();
+    } catch (e) {
+      // Silently ignore
+    }
   }
 
   /**
