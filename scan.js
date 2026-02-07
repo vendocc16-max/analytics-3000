@@ -4,10 +4,19 @@
  * It finds all SVG charts, runs IQR analysis, and returns results.
  * No content script, no message passing — everything runs in one shot.
  */
-(function() {
+(async function() {
   'use strict';
 
   console.log('%c🔍 Looker Extension: Scan starting...', 'background: blue; color: white; padding: 4px 8px;');
+
+  // Read scan settings (recency filter) from storage
+  const settings = await new Promise(resolve => {
+    chrome.storage.local.get('scanSettings', data => {
+      resolve(data.scanSettings || { maxDays: 7 });
+    });
+  });
+  const MAX_DAYS = settings.maxDays;
+  console.log(`Recency filter: ${MAX_DAYS === 0 ? 'disabled' : MAX_DAYS + ' days'}`);
 
   // ── SVG Parser ──────────────────────────────────────────────────────────────
 
@@ -134,6 +143,9 @@
    * older than 7 days, meaning the chart should be skipped.
    */
   function isChartRecent(chartContainer) {
+    // If filter is disabled (0), include all charts
+    if (MAX_DAYS === 0) return true;
+
     const svg = chartContainer.querySelector('svg');
     if (!svg) return true; // If we can't determine, don't skip
 
@@ -204,7 +216,7 @@
     const diffDays = (now - latestDate) / (1000 * 60 * 60 * 24);
     console.log(`  Latest x-axis date: ${latestDate.toDateString()}, ${diffDays.toFixed(0)} days ago`);
 
-    return diffDays <= 7;
+    return diffDays <= MAX_DAYS;
   }
 
   // ── Main Scan ───────────────────────────────────────────────────────────────

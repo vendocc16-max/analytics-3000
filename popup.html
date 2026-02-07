@@ -212,6 +212,37 @@
             padding: 8px;
         }
 
+        .filter-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .filter-row label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #555;
+            white-space: nowrap;
+        }
+
+        .filter-row select {
+            flex: 1;
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 13px;
+            background: white;
+            color: #333;
+            cursor: pointer;
+        }
+
+        .filter-row select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+        }
+
         .deviant-badge {
             display: inline-block;
             padding: 2px 8px;
@@ -240,6 +271,17 @@
                 <div class="stat-value" id="deviations-count">0</div>
                 <div class="stat-label">Deviations Found</div>
             </div>
+        </div>
+
+        <div class="filter-row">
+            <label for="days-filter">Recency filter:</label>
+            <select id="days-filter">
+                <option value="7" selected>Last 7 days</option>
+                <option value="5">Last 5 days</option>
+                <option value="14">Last 14 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="0">All (no filter)</option>
+            </select>
         </div>
 
         <div class="button-group">

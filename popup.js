@@ -7,6 +7,7 @@
 const UI = {
   scanBtn: document.getElementById('scan-btn'),
   clearBtn: document.getElementById('clear-btn'),
+  daysFilter: document.getElementById('days-filter'),
   resultsContainer: document.getElementById('results'),
   statusBadge: document.getElementById('status'),
   totalChartsDisplay: document.getElementById('total-charts'),
@@ -80,6 +81,10 @@ async function startScan() {
     if (!tab) {
       throw new Error('No active tab found');
     }
+
+    // Store the recency filter setting so scan.js can read it
+    const maxDays = parseInt(UI.daysFilter.value) || 0;
+    await chrome.storage.local.set({ scanSettings: { maxDays } });
 
     // Inject and execute scan.js directly into the page
     const injectionResults = await chrome.scripting.executeScript({
