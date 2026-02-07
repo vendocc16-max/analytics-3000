@@ -1,7 +1,8 @@
 /**
  * Self-contained scan function.
  * This is injected directly into the page by the popup via chrome.scripting.executeScript.
- * It finds all SVG charts, runs IQR analysis, and returns results.
+ * It finds all SVG charts, optionally drills down to a target metric/granularity,
+ * runs IQR analysis, and returns results.
  * No content script, no message passing — everything runs in one shot.
  */
 (async function() {
@@ -9,14 +10,19 @@
 
   console.log('%c🔍 Looker Extension: Scan starting...', 'background: blue; color: white; padding: 4px 8px;');
 
-  // Read scan settings (recency filter) from storage
+  // Read scan settings from storage
   const settings = await new Promise(resolve => {
     chrome.storage.local.get('scanSettings', data => {
       resolve(data.scanSettings || { maxDays: 7 });
     });
   });
   const MAX_DAYS = settings.maxDays;
+  const AUTO_DRILL = settings.autoDrillDown || false;
+  const TARGET_METRIC = settings.targetMetric || '';
+  const TARGET_GRANULARITY = settings.targetGranularity || '';
+
   console.log(`Recency filter: ${MAX_DAYS === 0 ? 'disabled' : MAX_DAYS + ' days'}`);
+  console.log(`Auto drill-down: ${AUTO_DRILL ? `metric="${TARGET_METRIC}", granularity="${TARGET_GRANULARITY}"` : 'disabled'}`);
 
   // ── SVG Parser ──────────────────────────────────────────────────────────────
 
@@ -80,7 +86,6 @@
   // ── Chart Discovery ─────────────────────────────────────────────────────────
 
   function findCharts() {
-    // Try multiple selectors for Looker Studio charts
     const selectors = [
       'ng2-canvas-component.simple-linechart',
       '[data-ng-type="chart"]',
@@ -93,7 +98,6 @@
       document.querySelectorAll(sel).forEach(el => found.add(el));
     }
 
-    // Filter to elements with SVGs that have actual path data
     return Array.from(found).filter(el => {
       const svg = el.querySelector('svg');
       return svg && svg.querySelectorAll('path[d]').length > 0;
@@ -101,15 +105,11 @@
   }
 
   function getChartTitle(container) {
-    // 1. Get the metric/series name from the legend inside the chart
-    const svg = container.querySelector('svg');
     const legendEl = container.querySelector(
       '[data-ng-type="chart-title"], .legend-label, .legend-text'
     );
     const seriesName = legendEl ? legendEl.textContent.trim() : '';
 
-    // 2. Get the funnel/section name by walking up further in the DOM
-    //    to find the large heading above the chart (e.g. "SIM-Only")
     let funnelName = '';
     let el = container;
     for (let i = 0; i < 15 && el; i++) {
@@ -120,7 +120,6 @@
       );
       if (heading && heading.textContent.trim()) {
         const text = heading.textContent.trim();
-        // Skip if it's the same as the series name (legend inside the chart)
         if (text !== seriesName) {
           funnelName = text;
           break;
@@ -136,24 +135,15 @@
 
   // ── Recency Check ──────────────────────────────────────────────────────────
 
-  /**
-   * Checks if the chart's latest data point is within the last 7 days.
-   * Looks at x-axis text labels (e.g. "Feb 2026", "Jan 2025") in the SVG
-   * and parses the rightmost one. Returns false if the latest label is
-   * older than 7 days, meaning the chart should be skipped.
-   */
   function isChartRecent(chartContainer) {
-    // If filter is disabled (0), include all charts
     if (MAX_DAYS === 0) return true;
 
     const svg = chartContainer.querySelector('svg');
-    if (!svg) return true; // If we can't determine, don't skip
+    if (!svg) return true;
 
-    // Collect all <text> elements — x-axis labels are typically at the bottom
     const textEls = svg.querySelectorAll('text');
     if (textEls.length === 0) return true;
 
-    // Try to find date-like labels and pick the rightmost one (highest x position)
     const datePattern = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})$/i;
     const weekPattern = /^W(\d{1,2})\s+(\d{4})$/i;
     const dayPattern = /^(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})$/i;
@@ -164,21 +154,17 @@
     textEls.forEach(t => {
       const text = t.textContent.trim();
       const x = parseFloat(t.getAttribute('x') || t.getBBox?.()?.x || 0);
-
       let parsed = null;
 
-      // Try "Mon YYYY" format (e.g. "Feb 2026")
       let m = text.match(datePattern);
       if (m) {
         const monthNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
         const monthIdx = monthNames.indexOf(m[1].toLowerCase());
         if (monthIdx >= 0) {
-          // Use end of month as the date for that label
           parsed = new Date(parseInt(m[2]), monthIdx + 1, 0);
         }
       }
 
-      // Try "D Mon YYYY" format
       if (!parsed) {
         m = text.match(dayPattern);
         if (m) {
@@ -190,11 +176,9 @@
         }
       }
 
-      // Try "W## YYYY" format (week number)
       if (!parsed) {
         m = text.match(weekPattern);
         if (m) {
-          // Approximate: week number × 7 days from start of year
           const year = parseInt(m[2]);
           const week = parseInt(m[1]);
           parsed = new Date(year, 0, 1 + (week - 1) * 7);
@@ -209,7 +193,7 @@
 
     if (!latestDate) {
       console.log('  Could not parse any date labels, including chart');
-      return true; // Can't determine, don't skip
+      return true;
     }
 
     const now = new Date();
@@ -219,17 +203,251 @@
     return diffDays <= MAX_DAYS;
   }
 
+  // ── Drill-Down Automation ─────────────────────────────────────────────────
+
+  /** Dispatch hover events to reveal hidden chart controls */
+  function dispatchHover(element) {
+    for (const type of ['pointerenter', 'mouseover', 'mouseenter']) {
+      element.dispatchEvent(new MouseEvent(type, {
+        view: window, bubbles: true, cancelable: true
+      }));
+    }
+  }
+
+  /** Fingerprint the current SVG state for change detection */
+  function snapshotSVG(chartContainer) {
+    const svg = chartContainer.querySelector('svg');
+    if (!svg) return null;
+    const paths = svg.querySelectorAll('path[d]');
+    const dValues = Array.from(paths).map(p => p.getAttribute('d')).join('|');
+    return { pathCount: paths.length, hash: dValues.length + ':' + dValues.substring(0, 200) };
+  }
+
+  /** Wait for an element matching a selector or test function (MutationObserver-based) */
+  function waitForElement(selectorOrTest, timeoutMs = 3000) {
+    return new Promise((resolve, reject) => {
+      const testFn = typeof selectorOrTest === 'function'
+        ? selectorOrTest
+        : () => document.querySelector(selectorOrTest);
+
+      const existing = testFn();
+      if (existing) { resolve(existing); return; }
+
+      const observer = new MutationObserver(() => {
+        const el = testFn();
+        if (el) {
+          observer.disconnect();
+          clearTimeout(timer);
+          resolve(el);
+        }
+      });
+
+      observer.observe(document.body, { childList: true, subtree: true });
+
+      const timer = setTimeout(() => {
+        observer.disconnect();
+        reject(new Error(`waitForElement timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+  }
+
+  /** Wait for the SVG inside a chart to change (re-render after drill/metric change) */
+  function waitForSVGChange(chartContainer, previousSnapshot, timeoutMs = 8000) {
+    return new Promise((resolve) => {
+      const svg = chartContainer.querySelector('svg');
+      if (!svg) { resolve(); return; }
+
+      const check = () => {
+        const current = snapshotSVG(chartContainer);
+        if (!current) return false;
+        return current.pathCount !== previousSnapshot.pathCount ||
+               current.hash !== previousSnapshot.hash;
+      };
+
+      if (check()) { resolve(); return; }
+
+      const observer = new MutationObserver(() => {
+        if (check()) {
+          observer.disconnect();
+          clearTimeout(timer);
+          // Small settling delay — paths may update in batches
+          setTimeout(resolve, 300);
+        }
+      });
+
+      observer.observe(svg, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['d', 'cx', 'cy', 'transform']
+      });
+
+      // Timeout resolves (not rejects) — chart may already be in target state
+      const timer = setTimeout(() => {
+        observer.disconnect();
+        resolve();
+      }, timeoutMs);
+    });
+  }
+
+  /** Find drill-down and metric buttons by walking up the DOM */
+  function findChartControls(chartContainer) {
+    const searchRoots = [chartContainer];
+    let parent = chartContainer.parentElement;
+    for (let i = 0; i < 5 && parent; i++) {
+      searchRoots.push(parent);
+      parent = parent.parentElement;
+    }
+
+    const drillSelectors = [
+      '[aria-label*="Drill"]', '[title*="Drill"]', '[data-tooltip*="Drill"]',
+      '[aria-label*="drill"]', '[title*="drill"]'
+    ];
+
+    const metricSelectors = [
+      '[aria-label*="Optional metric"]', '[aria-label*="optional metric"]',
+      '[aria-label*="Metric"]', '[title*="Metric"]', '[data-tooltip*="Metric"]',
+      '[aria-label*="metric"]'
+    ];
+
+    let drillButton = null;
+    let metricButton = null;
+
+    for (const root of searchRoots) {
+      if (!drillButton) {
+        for (const sel of drillSelectors) {
+          drillButton = root.querySelector(sel);
+          if (drillButton) break;
+        }
+      }
+      if (!metricButton) {
+        for (const sel of metricSelectors) {
+          metricButton = root.querySelector(sel);
+          if (metricButton) break;
+        }
+      }
+      if (drillButton && metricButton) break;
+    }
+
+    return { drillButton, metricButton };
+  }
+
+  /** Find and click a menu item by text */
+  async function clickMenuItem(text, timeoutMs = 3000) {
+    const menuItem = await waitForElement(() => {
+      const candidates = document.querySelectorAll(
+        '[role="menuitem"], [role="option"], .goog-menuitem, .goog-menuitem-content'
+      );
+      for (const item of candidates) {
+        const itemText = item.textContent.trim();
+        if (itemText === text || itemText.includes(text)) {
+          return item;
+        }
+      }
+      return null;
+    }, timeoutMs);
+
+    menuItem.click();
+    return true;
+  }
+
+  /** Dismiss any open menus/popups */
+  function dismissOpenMenus() {
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true
+    }));
+    document.body.click();
+  }
+
+  /**
+   * Prepare a chart for analysis: hover → select metric → drill down → wait for re-render.
+   * Returns { metricChanged, granularityChanged, error }
+   */
+  async function prepareChart(chartContainer, targetMetric, targetGranularity) {
+    const log = (msg) => console.log(`  [drill-down] ${msg}`);
+    const result = { metricChanged: false, granularityChanged: false, error: null };
+
+    try {
+      // Step 1: Hover to reveal controls
+      const hoverTarget = chartContainer.querySelector('.component-body') ||
+                          chartContainer.querySelector('.component') ||
+                          chartContainer;
+      dispatchHover(hoverTarget);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Step 2: Find controls
+      const controls = findChartControls(chartContainer);
+
+      // Step 3: Select metric (if button found and metric specified)
+      if (targetMetric && controls.metricButton) {
+        log(`Found metric button, selecting "${targetMetric}"...`);
+        const preSnapshot = snapshotSVG(chartContainer);
+
+        controls.metricButton.click();
+
+        try {
+          await clickMenuItem(targetMetric, 3000);
+          log(`Clicked "${targetMetric}" menu item`);
+          result.metricChanged = true;
+
+          if (preSnapshot) {
+            await waitForSVGChange(chartContainer, preSnapshot, 8000);
+            log('SVG re-rendered after metric change');
+          }
+        } catch (e) {
+          log(`Could not select metric "${targetMetric}": ${e.message}`);
+          dismissOpenMenus();
+        }
+      } else if (targetMetric) {
+        log('No metric button found, proceeding with current metric');
+      }
+
+      // Step 4: Drill down (if button found and granularity specified)
+      if (targetGranularity && controls.drillButton) {
+        log(`Found drill button, drilling to "${targetGranularity}"...`);
+        const preSnapshot = snapshotSVG(chartContainer);
+
+        controls.drillButton.click();
+
+        try {
+          await clickMenuItem(targetGranularity, 3000);
+          log(`Clicked "${targetGranularity}" menu item`);
+          result.granularityChanged = true;
+
+          if (preSnapshot) {
+            await waitForSVGChange(chartContainer, preSnapshot, 8000);
+            log('SVG re-rendered after granularity change');
+          }
+        } catch (e) {
+          log(`Could not select granularity "${targetGranularity}": ${e.message}`);
+          dismissOpenMenus();
+        }
+      } else if (targetGranularity) {
+        log('No drill button found, analyzing chart as-is');
+      }
+
+      // Step 5: Clean up
+      dismissOpenMenus();
+      await new Promise(r => setTimeout(r, 200));
+
+    } catch (e) {
+      result.error = e.message;
+      log(`Preparation failed: ${e.message}`);
+      dismissOpenMenus();
+    }
+
+    return result;
+  }
+
   // ── Main Scan ───────────────────────────────────────────────────────────────
 
   const charts = findCharts();
   console.log(`Found ${charts.length} charts with SVG data`);
 
-  // Also log all SVGs on the page for debugging
   const allSvgs = document.querySelectorAll('svg');
   console.log(`Total SVGs on page: ${allSvgs.length}`);
 
   if (charts.length === 0) {
-    // Fallback: try to find ANY SVG with path data
     console.log('No charts found via selectors. Trying raw SVG scan...');
     allSvgs.forEach((svg, i) => {
       const paths = svg.querySelectorAll('path[d]');
@@ -241,30 +459,42 @@
 
   const results = [];
 
-  charts.forEach((chart, index) => {
+  for (let index = 0; index < charts.length; index++) {
+    const chart = charts[index];
     const svg = chart.querySelector('svg');
-    if (!svg) return;
+    if (!svg) continue;
 
     const title = getChartTitle(chart);
-    console.log(`Analyzing chart ${index + 1}: "${title}"`);
+    console.log(`Analyzing chart ${index + 1}/${charts.length}: "${title}"`);
 
-    // Skip charts whose latest data point is older than 7 days
+    // Skip charts whose latest data point is older than MAX_DAYS
     if (!isChartRecent(chart)) {
-      console.log(`  Skipping "${title}" — latest data is older than 7 days`);
-      return;
+      console.log(`  Skipping "${title}" — latest data is older than ${MAX_DAYS} days`);
+      continue;
     }
 
-    // Get data from paths
+    // Drill-down automation (if enabled)
+    if (AUTO_DRILL) {
+      const prepResult = await prepareChart(
+        chart,
+        TARGET_METRIC || null,
+        TARGET_GRANULARITY || null
+      );
+      console.log(`  Prep: metric=${prepResult.metricChanged}, drill=${prepResult.granularityChanged}${prepResult.error ? ', error=' + prepResult.error : ''}`);
+    }
+
+    // Report progress
+    chrome.storage.local.set({
+      scanProgress: { current: index + 1, total: charts.length, currentChart: title }
+    });
+
+    // ── IQR Analysis on paths ──
     const paths = svg.querySelectorAll('path[d]');
     paths.forEach((path, pi) => {
       const coords = extractCoordsFromPath(path.getAttribute('d'));
       if (coords.length < 4) return;
 
-      // SVG y-axis is inverted (0 = top), so negate y-values to get real-world direction.
-      // This way higher data values become higher numbers for IQR analysis.
       const yValues = coords.map(c => -c.y);
-
-      // Latest data point = rightmost (max x), not last in path order
       const latest = coords.reduce((best, c) => c.x > best.x ? c : best, coords[0]);
       const latestY = -latest.y;
 
@@ -286,13 +516,12 @@
           deviationType: outlier.deviationType
         });
 
-        // Highlight the chart with a red border
         chart.style.outline = '3px solid red';
         chart.style.outlineOffset = '2px';
       }
     });
 
-    // Also check circles
+    // ── IQR Analysis on circles ──
     const circles = svg.querySelectorAll('circle');
     if (circles.length >= 4) {
       const coords = extractCoordsFromCircles(circles);
@@ -318,7 +547,7 @@
         }
       }
     }
-  });
+  }
 
   console.log(`%c✅ Scan complete: ${results.length} deviations in ${charts.length} charts`, 'background: green; color: white; padding: 4px 8px;');
 
@@ -333,6 +562,8 @@
     }
   });
 
-  // Return results (available to executeScript caller)
+  // Clear progress
+  chrome.storage.local.remove('scanProgress');
+
   return { results, totalCharts: charts.length, totalSvgs: allSvgs.length };
 })();

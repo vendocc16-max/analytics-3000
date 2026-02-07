@@ -243,6 +243,19 @@
             box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
         }
 
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+
         .deviant-badge {
             display: inline-block;
             padding: 2px 8px;
@@ -281,6 +294,32 @@
                 <option value="14">Last 14 days</option>
                 <option value="30">Last 30 days</option>
                 <option value="0">All (no filter)</option>
+            </select>
+        </div>
+
+        <div class="filter-row">
+            <label class="checkbox-label">
+                <input type="checkbox" id="auto-drill" checked>
+                Auto drill-down
+            </label>
+        </div>
+
+        <div class="filter-row" id="drill-options">
+            <label for="metric-select">Metric:</label>
+            <select id="metric-select">
+                <option value="">Keep current</option>
+                <option value="CVR" selected>CVR</option>
+                <option value="Sessions">Sessions</option>
+                <option value="Transactions">Transactions</option>
+                <option value="Revenue">Revenue</option>
+            </select>
+
+            <label for="granularity-select">Drill to:</label>
+            <select id="granularity-select">
+                <option value="">Keep current</option>
+                <option value="Week" selected>Week</option>
+                <option value="Day">Day</option>
+                <option value="Month">Month</option>
             </select>
         </div>
 
