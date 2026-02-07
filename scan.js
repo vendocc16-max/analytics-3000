@@ -92,20 +92,119 @@
   }
 
   function getChartTitle(container) {
-    // Walk up the DOM tree to find a title near the chart
+    // 1. Get the metric/series name from the legend inside the chart
+    const svg = container.querySelector('svg');
+    const legendEl = container.querySelector(
+      '[data-ng-type="chart-title"], .legend-label, .legend-text'
+    );
+    const seriesName = legendEl ? legendEl.textContent.trim() : '';
+
+    // 2. Get the funnel/section name by walking up further in the DOM
+    //    to find the large heading above the chart (e.g. "SIM-Only")
+    let funnelName = '';
     let el = container;
-    for (let i = 0; i < 5 && el; i++) {
+    for (let i = 0; i < 15 && el; i++) {
       el = el.parentElement;
       if (!el) break;
-      // Look for title-like elements
-      const titleEl = el.querySelector(
-        '[data-ng-type="chart-title"], [role="heading"], .widget-title, .chart-title'
+      const heading = el.querySelector(
+        '[role="heading"], h1, h2, h3, .widget-title, .chart-title'
       );
-      if (titleEl && titleEl.textContent.trim()) {
-        return titleEl.textContent.trim();
+      if (heading && heading.textContent.trim()) {
+        const text = heading.textContent.trim();
+        // Skip if it's the same as the series name (legend inside the chart)
+        if (text !== seriesName) {
+          funnelName = text;
+          break;
+        }
       }
     }
-    return 'Unnamed Chart';
+
+    if (funnelName && seriesName) {
+      return `${funnelName} — ${seriesName}`;
+    }
+    return funnelName || seriesName || 'Unnamed Chart';
+  }
+
+  // ── Recency Check ──────────────────────────────────────────────────────────
+
+  /**
+   * Checks if the chart's latest data point is within the last 7 days.
+   * Looks at x-axis text labels (e.g. "Feb 2026", "Jan 2025") in the SVG
+   * and parses the rightmost one. Returns false if the latest label is
+   * older than 7 days, meaning the chart should be skipped.
+   */
+  function isChartRecent(chartContainer) {
+    const svg = chartContainer.querySelector('svg');
+    if (!svg) return true; // If we can't determine, don't skip
+
+    // Collect all <text> elements — x-axis labels are typically at the bottom
+    const textEls = svg.querySelectorAll('text');
+    if (textEls.length === 0) return true;
+
+    // Try to find date-like labels and pick the rightmost one (highest x position)
+    const datePattern = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})$/i;
+    const weekPattern = /^W(\d{1,2})\s+(\d{4})$/i;
+    const dayPattern = /^(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})$/i;
+
+    let latestDate = null;
+    let latestX = -Infinity;
+
+    textEls.forEach(t => {
+      const text = t.textContent.trim();
+      const x = parseFloat(t.getAttribute('x') || t.getBBox?.()?.x || 0);
+
+      let parsed = null;
+
+      // Try "Mon YYYY" format (e.g. "Feb 2026")
+      let m = text.match(datePattern);
+      if (m) {
+        const monthNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+        const monthIdx = monthNames.indexOf(m[1].toLowerCase());
+        if (monthIdx >= 0) {
+          // Use end of month as the date for that label
+          parsed = new Date(parseInt(m[2]), monthIdx + 1, 0);
+        }
+      }
+
+      // Try "D Mon YYYY" format
+      if (!parsed) {
+        m = text.match(dayPattern);
+        if (m) {
+          const monthNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+          const monthIdx = monthNames.indexOf(m[2].toLowerCase());
+          if (monthIdx >= 0) {
+            parsed = new Date(parseInt(m[3]), monthIdx, parseInt(m[1]));
+          }
+        }
+      }
+
+      // Try "W## YYYY" format (week number)
+      if (!parsed) {
+        m = text.match(weekPattern);
+        if (m) {
+          // Approximate: week number × 7 days from start of year
+          const year = parseInt(m[2]);
+          const week = parseInt(m[1]);
+          parsed = new Date(year, 0, 1 + (week - 1) * 7);
+        }
+      }
+
+      if (parsed && x > latestX) {
+        latestX = x;
+        latestDate = parsed;
+      }
+    });
+
+    if (!latestDate) {
+      console.log('  Could not parse any date labels, including chart');
+      return true; // Can't determine, don't skip
+    }
+
+    const now = new Date();
+    const diffDays = (now - latestDate) / (1000 * 60 * 60 * 24);
+    console.log(`  Latest x-axis date: ${latestDate.toDateString()}, ${diffDays.toFixed(0)} days ago`);
+
+    return diffDays <= 7;
   }
 
   // ── Main Scan ───────────────────────────────────────────────────────────────
@@ -136,6 +235,12 @@
 
     const title = getChartTitle(chart);
     console.log(`Analyzing chart ${index + 1}: "${title}"`);
+
+    // Skip charts whose latest data point is older than 7 days
+    if (!isChartRecent(chart)) {
+      console.log(`  Skipping "${title}" — latest data is older than 7 days`);
+      return;
+    }
 
     // Get data from paths
     const paths = svg.querySelectorAll('path[d]');
