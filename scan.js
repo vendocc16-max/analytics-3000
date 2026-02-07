@@ -475,12 +475,30 @@
 
     // Drill-down automation (if enabled)
     if (AUTO_DRILL) {
+      console.log(`  [drill-down] AUTO_DRILL is ON, preparing chart...`);
+
+      // Debug: dump DOM around chart to find control buttons
+      const searchRoots = [chart];
+      let _p = chart.parentElement;
+      for (let _i = 0; _i < 5 && _p; _i++) { searchRoots.push(_p); _p = _p.parentElement; }
+      for (const root of searchRoots) {
+        const allButtons = root.querySelectorAll('[role="button"], button, [aria-label]');
+        if (allButtons.length > 0) {
+          console.log(`  [drill-down] Buttons in <${root.tagName}.${root.className?.split?.(' ')?.[0] || ''}>:`);
+          allButtons.forEach(b => {
+            console.log(`    tag=${b.tagName}, aria="${b.getAttribute('aria-label') || ''}", title="${b.getAttribute('title') || ''}", text="${b.textContent?.trim()?.substring(0, 50) || ''}"`)
+          });
+        }
+      }
+
       const prepResult = await prepareChart(
         chart,
         TARGET_METRIC || null,
         TARGET_GRANULARITY || null
       );
       console.log(`  Prep: metric=${prepResult.metricChanged}, drill=${prepResult.granularityChanged}${prepResult.error ? ', error=' + prepResult.error : ''}`);
+    } else {
+      console.log(`  [drill-down] AUTO_DRILL is OFF, skipping`);
     }
 
     // Report progress
