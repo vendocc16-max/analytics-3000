@@ -55,13 +55,15 @@
 
   function detectOutlier(value, q) {
     if (!q || q.iqr === 0) return { isOutlier: false };
-    if (value < q.lowerBound) {
+    // Flag if the value is outside the Q1–Q3 band (the blue shaded area),
+    // not the wider 1.5×IQR whisker range.
+    if (value < q.q1) {
       const severity = Math.min(Math.abs(value - q.q2) / (q.iqr / 2), 10);
-      return { isOutlier: true, deviationType: 'negative', severity, value, bound: q.lowerBound };
+      return { isOutlier: true, deviationType: 'negative', severity, value, bound: q.q1 };
     }
-    if (value > q.upperBound) {
+    if (value > q.q3) {
       const severity = Math.min(Math.abs(value - q.q2) / (q.iqr / 2), 10);
-      return { isOutlier: true, deviationType: 'positive', severity, value, bound: q.upperBound };
+      return { isOutlier: true, deviationType: 'positive', severity, value, bound: q.q3 };
     }
     return { isOutlier: false, severity: 0 };
   }
@@ -141,9 +143,14 @@
       const coords = extractCoordsFromPath(path.getAttribute('d'));
       if (coords.length < 4) return;
 
-      // Use y-values for IQR analysis
-      const yValues = coords.map(c => c.y);
-      const latestY = coords[coords.length - 1].y;
+      // SVG y-axis is inverted (0 = top), so negate y-values to get real-world direction.
+      // This way higher data values become higher numbers for IQR analysis.
+      const yValues = coords.map(c => -c.y);
+
+      // Latest data point = rightmost (max x), not last in path order
+      const latest = coords.reduce((best, c) => c.x > best.x ? c : best, coords[0]);
+      const latestY = -latest.y;
+
       const quartiles = calculateQuartiles(yValues);
       if (!quartiles) return;
 
@@ -173,8 +180,9 @@
     if (circles.length >= 4) {
       const coords = extractCoordsFromCircles(circles);
       if (coords.length >= 4) {
-        const yValues = coords.map(c => c.y);
-        const latestY = coords[coords.length - 1].y;
+        const yValues = coords.map(c => -c.y);
+        const latest = coords.reduce((best, c) => c.x > best.x ? c : best, coords[0]);
+        const latestY = -latest.y;
         const quartiles = calculateQuartiles(yValues);
         if (quartiles) {
           const outlier = detectOutlier(latestY, quartiles);
