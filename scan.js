@@ -205,11 +205,38 @@
 
   // ── Drill-Down Automation ─────────────────────────────────────────────────
 
+  /**
+   * Simulate a real mouse click with full event chain.
+   * Bare .click() only fires a 'click' event, which Angular/Closure Library
+   * may ignore because they bind to mousedown/mouseup state transitions.
+   * This dispatches the complete sequence a real browser click produces.
+   */
+  function simulateRealClick(element) {
+    const rect = element.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const props = {
+      view: window, bubbles: true, cancelable: true,
+      clientX: x, clientY: y,
+      screenX: x + window.screenX, screenY: y + window.screenY,
+      button: 0, buttons: 1
+    };
+    element.dispatchEvent(new PointerEvent('pointerdown', { ...props, pointerId: 1, pointerType: 'mouse' }));
+    element.dispatchEvent(new MouseEvent('mousedown', props));
+    element.dispatchEvent(new PointerEvent('pointerup', { ...props, pointerId: 1, pointerType: 'mouse' }));
+    element.dispatchEvent(new MouseEvent('mouseup', props));
+    element.dispatchEvent(new MouseEvent('click', props));
+  }
+
   /** Dispatch hover events to reveal hidden chart controls */
   function dispatchHover(element) {
+    const rect = element.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
     for (const type of ['pointerenter', 'mouseover', 'mouseenter']) {
       element.dispatchEvent(new MouseEvent(type, {
-        view: window, bubbles: true, cancelable: true
+        view: window, bubbles: true, cancelable: true,
+        clientX: x, clientY: y
       }));
     }
   }
@@ -385,7 +412,7 @@
       throw err;
     });
 
-    menuItem.click();
+    simulateRealClick(menuItem);
     return true;
   }
 
@@ -427,7 +454,7 @@
         log(`Found metric button, selecting "${targetMetric}"...`);
         const preSnapshot = snapshotSVG(chartContainer);
 
-        controls.metricButton.click();
+        simulateRealClick(controls.metricButton);
 
         try {
           await clickMenuItem(targetMetric, 3000);
@@ -451,7 +478,7 @@
         log(`Found drill button, drilling to "${targetGranularity}"...`);
         const preSnapshot = snapshotSVG(chartContainer);
 
-        controls.drillButton.click();
+        simulateRealClick(controls.drillButton);
 
         try {
           await clickMenuItem(targetGranularity, 3000);
